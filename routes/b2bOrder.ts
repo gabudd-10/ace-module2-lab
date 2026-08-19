@@ -16,7 +16,26 @@ import * as utils from '../lib/utils'
 export function b2bOrder () {
   return ({ body }: Request, res: Response, next: NextFunction) => {
     if (utils.isChallengeEnabled(challenges.rceChallenge) || utils.isChallengeEnabled(challenges.rceOccupyChallenge)) {
-      const orderLinesData = body.orderLinesData || ''
+      let orderLinesData = typeof body.orderLinesData === 'string' ? body.orderLinesData : ''
+
+      const lower = orderLinesData.toLowerCase()
+      const blockedChars = ['[', ']', '"', "'", '`', '\\']
+      const blockedWords = [
+        'this', 'constructor', 'prototype', '__proto__', 'process', 'require',
+        'import', 'global', 'function', 'object', 'array', 'string', 'buffer',
+        'reflect', 'proxy', 'window', 'self', 'exec', 'spawn', 'child_process',
+        'mainmodule', 'eval', '__parent__', '__definegetter__', '__definesetter__',
+        '__lookupgetter__', '__lookupsetter__', 'regexp', 'map', 'set', 'promise',
+        'error', 'symbol', 'json', 'arguments'
+      ]
+
+      const isSuspicious = blockedChars.some(char => lower.includes(char)) ||
+                            blockedWords.some(word => lower.includes(word))
+
+      if (isSuspicious) {
+        throw new Error('Sanitization check failed: suspicious input detected.')
+      }
+
       try {
         const sandbox = { safeEval, orderLinesData }
         vm.createContext(sandbox)
