@@ -21,6 +21,108 @@ function favicon () {
   return utils.extractFilename(config.get('application.favicon'))
 }
 
+function safeEval (code: string): string | null {
+  if (!code) return null
+  code = code.trim()
+
+  const first = code[0]
+  const last = code[code.length - 1]
+  if ((first === "'" || first === '"' || first === '`') && last === first) {
+    const content = code.slice(1, -1)
+    if (first === '`' && content.includes('${')) {
+      return null
+    }
+    // Check for unescaped quote of same type
+    let escaped = false
+    for (let i = 0; i < content.length; i++) {
+      const char = content[i]
+      if (char === '\\') {
+        escaped = !escaped
+      } else {
+        if (char === first && !escaped) {
+          return null
+        }
+        escaped = false
+      }
+    }
+    // Safe to decode escape sequences
+    let result = ''
+    let i = 0
+    while (i < content.length) {
+      const char = content[i]
+      if (char === '\\') {
+        const nextChar = content[i + 1]
+        if (!nextChar) {
+          result += '\\'
+          i++
+          continue
+        }
+        if (nextChar === '0') {
+          result += '\0'
+          i += 2
+        } else if (nextChar === 'n') {
+          result += '\n'
+          i += 2
+        } else if (nextChar === 'r') {
+          result += '\r'
+          i += 2
+        } else if (nextChar === 't') {
+          result += '\t'
+          i += 2
+        } else if (nextChar === 'b') {
+          result += '\b'
+          i += 2
+        } else if (nextChar === 'f') {
+          result += '\f'
+          i += 2
+        } else if (nextChar === 'u') {
+          const hex = content.slice(i + 2, i + 6)
+          if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+            result += String.fromCharCode(parseInt(hex, 16))
+            i += 6
+          } else {
+            result += '\\u'
+            i += 2
+          }
+        } else if (nextChar === 'x') {
+          const hex = content.slice(i + 2, i + 4)
+          if (/^[0-9a-fA-F]{2}$/.test(hex)) {
+            result += String.fromCharCode(parseInt(hex, 16))
+            i += 4
+          } else {
+            result += '\\x'
+            i += 2
+          }
+        } else {
+          result += nextChar
+          i += 2
+        }
+      } else {
+        result += char
+        i++
+      }
+    }
+    return result
+  }
+
+  // Numbers
+  if (/^-?\d+(\.\d+)?$/.test(code)) {
+    return code
+  }
+
+  // Booleans
+  if (code === 'true' || code === 'false') {
+    return code
+  }
+
+  // Null
+  if (code === 'null') {
+    return 'null'
+  }
+
+  return null
+}
+
 export function getUserProfile () {
   return async (req: Request, res: Response, next: NextFunction) => {
     let template: string
@@ -58,12 +160,16 @@ export function getUserProfile () {
         if (!code) {
           throw new Error('Username is null')
         }
-        username = eval(code) // eslint-disable-line no-eval
+        const evaluated = safeEval(code)
+        if (evaluated === null) {
+          throw new Error('Invalid username pattern or execution blocked')
+        }
+        username = evaluated
       } catch (err) {
-        username = '\\' + username
+        username = '\\\\' + username
       }
     } else {
-      username = '\\' + username
+      username = '\\\\' + username
     }
 
     const themeKey = config.get<string>('application.theme') as keyof typeof themes
